@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Police Escape — Outsmart the Kidnapper</title>
+<meta name="description" content="A turn-based graph puzzle. Move the girl node to node, lure the kidnapper away, and reach the police station.">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background:#0f1b2d; color:#f2f5f9; display:flex; flex-direction:column; align-items:center;
+    min-height:100vh; padding:10px 8px 18px;
+  }
+  header { text-align:center; max-width:520px; }
+  h1 { font-size:22px; }
+  #objective { font-size:14.5px; font-weight:600; color:#ffd94d; margin-top:4px; }
+  #hud { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin:10px 0 8px; width:100%; max-width:520px; }
+  .pill { background:#1c2f4a; border:1px solid #35507a; border-radius:999px; padding:5px 12px; font-size:13.5px; font-weight:600; }
+  button { background:#2f6fed; color:#fff; border:none; border-radius:10px; padding:9px 14px; font-size:14px; font-weight:700; cursor:pointer; }
+  button.secondary { background:#1c2f4a; border:1px solid #35507a; }
+  button:active { transform:scale(.97); }
+  #board { background:#fdfdf8; border-radius:18px; width:min(96vw,500px); aspect-ratio:100/118; touch-action:manipulation; cursor:pointer; box-shadow:0 10px 30px rgba(0,0,0,.45); }
+  #status { margin-top:10px; font-size:15px; font-weight:600; text-align:center; min-height:22px; max-width:500px; }
+  #status.lose { color:#ff7b72; } #status.win { color:#7ee787; }
+  #levelBar { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:10px; max-width:500px; }
+  .lvl { width:38px; height:38px; border-radius:50%; border:2px solid #35507a; background:#1c2f4a; color:#f2f5f9; font-weight:800; font-size:15px; cursor:pointer; padding:0; }
+  .lvl.current { border-color:#ffd94d; background:#2f6fed; }
+  .lvl.done { background:#1f7a3d; border-color:#2ea043; }
+  .lvl.locked { opacity:.35; cursor:not-allowed; }
+  footer { margin-top:14px; font-size:12.5px; color:#8fa3bf; text-align:center; max-width:500px; line-height:1.5; }
+  #overlay { position:fixed; inset:0; background:rgba(5,10,20,.72); display:none; align-items:center; justify-content:center; z-index:10; padding:16px; }
+  #overlay.show { display:flex; }
+  .card { background:#16263f; border:1px solid #35507a; border-radius:18px; padding:26px 22px; text-align:center; max-width:360px; width:100%; }
+  .card .big { font-size:46px; }
+  .card h2 { margin:8px 0 6px; font-size:22px; }
+  .card p { color:#c4d2e4; font-size:14.5px; margin-bottom:16px; }
+  .card .row { display:flex; gap:8px; justify-content:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚔 Police Escape</h1>
+  <div id="objective">Avoid the kidnapper and get the girl to the police station.</div>
+</header>
+
+<div id="hud">
+  <span class="pill" id="lvlName">Level 1</span>
+  <span class="pill">Moves: <span id="moves">0</span></span>
+  <button class="secondary" id="hintBtn">💡 Hint</button>
+  <button class="secondary" id="restartBtn">↺ Restart</button>
+</div>
+
+<canvas id="board" width="1000" height="1180"></canvas>
+<div id="status">Tap a glowing node next to the girl to move.</div>
+<div id="levelBar"></div>
+
+<footer>
+  How to play: tap a connected glowing node to move the girl one step. After every move,
+  the kidnapper moves one node toward her along the shortest path. If he lands on her, she's caught.
+  Reach the node under the police station to win. Lure him the wrong way, then sprint.
+</footer>
+
+<div id="overlay"><div class="card">
+  <div class="big" id="ovEmoji">🎉</div>
+  <h2 id="ovTitle">She made it!</h2>
+  <p id="ovText"></p>
+  <div class="row">
+    <button class="secondary" id="ovRetry">↺ Replay</button>
+    <button id="ovNext">Next level →</button>
+  </div>
+</div></div>
+
+<script>
+"use strict";
+/* ============ Levels ============
+   Coords are % of board (x 0-100, y 0-118). goal = node under the police
+   station; reaching it wins immediately, before the kidnapper moves.
+   Kidnapper AI: 1 node/turn along a BFS shortest path to the girl,
+   ties broken by lowest node id. The Hint solver uses the same rule. */
+const LEVELS = [
+  { name:"Level 1 · First Escape",
+    nodes:[[18,34],[55,34],[88,34],[18,62],[55,62],[55,80],[18,96],[88,96]],
+    edges:[[0,1],[1,2],[0,3],[3,6],[2,7],[2,3],[3,4],[4,5],[6,5],[5,7],[6,7]],
+    girl:6, kidnapper:0, goal:1 },
+  { name:"Level 2 · The Market",
+    nodes:[[15,32],[50,32],[85,32],[15,58],[50,58],[85,58],[15,86],[50,86],[85,86]],
+    edges:[[0,1],[1,2],[0,3],[2,5],[3,6],[5,8],[6,7],[7,8],[3,4],[4,2],[4,7],[4,8]],
+    girl:7, kidnapper:1, goal:0 },
+  { name:"Level 3 · River Bridge",
+    nodes:[[12,32],[38,32],[64,32],[88,32],[12,60],[38,60],[64,60],[88,60],[38,90],[64,90]],
+    edges:[[0,1],[1,2],[2,3],[4,5],[5,6],[6,7],[0,4],[1,5],[2,6],[3,7],[5,8],[6,9],[8,9],[4,8]],
+    girl:8, kidnapper:7, goal:3 },
+  { name:"Level 4 · Night Alley",
+    nodes:[[22,26],[50,24],[78,26],[90,46],[86,70],[66,90],[50,94],[34,90],[14,70],[10,46],[32,56],[68,56]],
+    edges:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8],[8,9],[9,10],[10,11],[11,0],[0,6],[2,8],[4,10],[5,11]],
+    girl:6, kidnapper:11, goal:3 },
+  { name:"Level 5 · Downtown",
+    nodes:[[15,30],[50,28],[85,30],[15,58],[50,58],[85,58],[15,86],[50,88],[85,86]],
+    edges:[[0,1],[1,2],[3,4],[4,5],[6,7],[7,8],[0,3],[1,4],[2,5],[3,6],[4,7],[5,8],[0,4],[4,8],[2,4],[6,4]],
+    girl:3, kidnapper:6, goal:7 },
+  { name:"Level 6 · Final Station",
+    nodes:[[10,30],[37,30],[63,30],[90,30],[10,58],[37,58],[63,58],[90,58],[10,88],[37,88],[63,88],[90,88]],
+    edges:[[0,1],[1,2],[2,3],[4,5],[5,6],[6,7],[8,9],[9,10],[10,11],[0,4],[1,5],[2,6],[3,7],[4,8],[5,9],[6,10],[7,11],[0,5],[5,10],[2,9]],
+    girl:11, kidnapper:5, goal:2 },
+];
+
+/* ============ Graph / AI ============ */
+function buildAdj(level){
+  const adj = level.nodes.map(()=>[]);
+  for (const [a,b] of level.edges){ adj[a].push(b); adj[b].push(a); }
+  return adj;
+}
+function bfsDist(adj, from){
+  const dist = new Array(adj.length).fill(Infinity); dist[from]=0;
+  const q=[from];
+  for (let i=0;i<q.length;i++){ const u=q[i]; for (const v of adj[u]) if (dist[v]===Infinity){ dist[v]=dist[u]+1; q.push(v); } }
+  return dist;
+}
+function kidnapperNext(adj, k, g){
+  if (k===g) return k;
+  const dist = bfsDist(adj, g);
+  if (!isFinite(dist[k])) return k;
+  let best=k, bd=Infinity, bid=Infinity;
+  for (const nb of adj[k]){
+    if (dist[nb]<bd || (dist[nb]===bd && nb<bid)){ bd=dist[nb]; bid=nb; best=nb; }
+  }
+  return best;
+}
+function solve(adj, girl, kid, goal){
+  const key=(g,k)=>g+","+k;
+  const parent=new Map([[key(girl,kid), null]]);
+  const q=[[girl,kid]];
+  for (let i=0;i<q.length;i++){
+    const [g,k]=q[i];
+    for (const nb of adj[g]){
+      if (nb===k) continue;
+      if (nb===goal){
+        const path=[goal]; let cur=[g,k];
+        while (cur){ path.unshift(cur[0]); cur = parent.get(key(cur[0],cur[1])); }
+        return path;
+      }
+      const nk = kidnapperNext(adj, k, nb);
+      if (nk===nb) continue;
+      const kk=key(nb,nk);
+      if (!parent.has(kk)){ parent.set(kk,[g,k]); q.push([nb,nk]); }
+    }
+  }
+  return null;
+}
+
+/* ============ State ============ */
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const W=1000, H=1180;
+let lvlIdx = 0, adj=[], girl=0, kid=0, goal=0, moves=0, over=false, busy=false;
+let girlXY=null, kidXY=null; // animated positions in px
+let hintNode = -1, hintUntil = 0;
+let unlocked = parseInt(localStorage.getItem("pe_unlocked")||"0",10);
+
+const px = n => [LEVELS[lvlIdx].nodes[n][0]/100*W, LEVELS[lvlIdx].nodes[n][1]/100*H];
+
+function loadLevel(i){
+  lvlIdx=i; const L=LEVELS[i]; adj=buildAdj(L);
+  girl=L.girl; kid=L.kidnapper; goal=L.goal; moves=0; over=false; busy=false; hintNode=-1;
+  girlXY=px(girl); kidXY=px(kid);
+  document.getElementById("lvlName").textContent = L.name;
+  document.getElementById("moves").textContent = "0";
+  setStatus("Tap a glowing node next to the girl to move.", "");
+  hideOverlay(); renderLevelBar(); draw();
+}
+function setStatus(t, cls){ const s=document.getElementById("status"); s.textContent=t; s.className=cls||""; }
+
+/* ============ Drawing ============ */
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const L=LEVELS[lvlIdx];
+  // police station above goal
+  const [gx,gy]=px(goal);
+  ctx.textAlign="center";
+  ctx.font="92px serif"; ctx.fillText("🏛️", gx, gy-78);
+  ctx.font="bold 30px system-ui, sans-serif";
+  const label="🚔 POLICE";
+  const tw=ctx.measureText(label).width+26;
+  ctx.fillStyle="#2f6fed"; roundRect(gx-tw/2, gy-72, tw, 42, 9); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.fillText(label, gx, gy-40);
+  // exit stem
+  ctx.strokeStyle="#2f6fed"; ctx.lineWidth=16;
+  ctx.beginPath(); ctx.moveTo(gx,gy-28); ctx.lineTo(gx,gy-16); ctx.stroke();
+  // edges
+  ctx.strokeStyle="#2b7de9"; ctx.lineWidth=17; ctx.lineCap="round";
+  for (const [a,b] of L.edges){
+    const [x1,y1]=px(a), [x2,y2]=px(b);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+  // nodes
+  const reachable = (!over && !busy) ? adj[girl] : [];
+  const now = performance.now();
+  L.nodes.forEach((n,i)=>{
+    const [x,y]=px(i);
+    const isHint = (i===hintNode && now<hintUntil);
+    const isReach = reachable.includes(i);
+    const pulse = isReach ? 1 + 0.06*Math.sin(now/280) : 1;
+    const r = 46*pulse;
+    ctx.beginPath(); ctx.arc(x,y,r+7,0,7); ctx.fillStyle="#8e7cc3"; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,r,0,7);
+    ctx.fillStyle = i===goal ? "#ffd94d" : (isHint ? "#ffb02e" : "#79c14f");
+    ctx.fill();
+    ctx.lineWidth=4; ctx.strokeStyle="#3d3d3d"; ctx.stroke();
+    if (isReach){
+      ctx.beginPath(); ctx.arc(x,y,r+15,0,7);
+      ctx.strokeStyle="rgba(47,111,237,.75)"; ctx.lineWidth=5; ctx.stroke();
+    }
+  });
+  drawChar(kidXY, "🥷");
+  drawChar(girlXY, "👧");
+}
+function drawChar([x,y], emoji){
+  ctx.beginPath(); ctx.ellipse(x, y+40, 30, 9, 0, 0, 7); ctx.fillStyle="rgba(0,0,0,.18)"; ctx.fill();
+  ctx.font="76px serif"; ctx.textAlign="center"; ctx.fillText(emoji, x, y+26);
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+(function loop(){ draw(); requestAnimationFrame(loop); })();
+
+/* ============ Animation / turns ============ */
+function tween(from, to, dur, onDone){
+  const t0=performance.now();
+  (function step(t){
+    const p=Math.min(1,(t-t0)/dur), e=1-Math.pow(1-p,3);
+    const cur=[from[0]+(to[0]-from[0])*e, from[1]+(to[1]-from[1])*e];
+    if (window._moving==="girl") girlXY=cur; else kidXY=cur;
+    if (p<1) requestAnimationFrame(step); else onDone();
+  })(t0);
+}
+function moveGirl(target){
+  if (busy || over) return;
+  if (!adj[girl].includes(target)) return;
+  busy=true; hintNode=-1; moves++;
+  document.getElementById("moves").textContent = moves;
+  window._moving="girl";
+  tween(girlXY, px(target), 300, ()=>{
+    girl=target;
+    if (girl===kid){ return endGame(false, "She ran straight into him!"); }
+    if (girl===goal){ return endGame(true, "She reached the police station in "+moves+" moves."); }
+    // kidnapper's turn
+    const nk = kidnapperNext(adj, kid, girl);
+    if (nk===kid){ busy=false; return; }
+    window._moving="kid";
+    tween(kidXY, px(nk), 320, ()=>{
+      kid=nk;
+      if (kid===girl){ return endGame(false, "Caught! The kidnapper reached her in "+moves+" moves."); }
+      busy=false;
+    });
+  });
+}
+function endGame(won, text){
+  over=true; busy=false;
+  setStatus(won ? "🎉 "+text : "😱 "+text, won ? "win" : "lose");
+  if (won && lvlIdx>=unlocked && lvlIdx<LEVELS.length-1){
+    unlocked=lvlIdx+1; localStorage.setItem("pe_unlocked", String(unlocked));
+  }
+  if (won) localStorage.setItem("pe_done_"+lvlIdx, "1");
+  renderLevelBar();
+  setTimeout(()=>{
+    document.getElementById("ovEmoji").textContent = won ? "🎉" : "😱";
+    document.getElementById("ovTitle").textContent = won ? "She made it!" : "Caught!";
+    document.getElementById("ovText").textContent = text;
+    document.getElementById("ovNext").style.display = (won && lvlIdx<LEVELS.length-1) ? "" : "none";
+    document.getElementById("overlay").classList.add("show");
+  }, 500);
+}
+function hideOverlay(){ document.getElementById("overlay").classList.remove("show"); }
+
+/* ============ Input / UI ============ */
+canvas.addEventListener("pointerdown", e=>{
+  const r=canvas.getBoundingClientRect();
+  const x=(e.clientX-r.left)/r.width*W, y=(e.clientY-r.top)/r.height*H;
+  let best=-1, bd=1e9;
+  LEVELS[lvlIdx].nodes.forEach((n,i)=>{
+    const [nx,ny]=px(i), d=Math.hypot(nx-x,ny-y);
+    if (d<bd){ bd=d; best=i; }
+  });
+  if (best>=0 && bd<95) moveGirl(best);
+});
+document.getElementById("restartBtn").onclick=()=>loadLevel(lvlIdx);
+document.getElementById("hintBtn").onclick=()=>{
+  if (over || busy) return;
+  const path=solve(adj, girl, kid, goal);
+  if (!path || path.length<2){ setStatus("No safe route from here — restart and try a different line.", "lose"); return; }
+  hintNode=path[1]; hintUntil=performance.now()+2600;
+  setStatus("Hint: the orange node is the solver's next move on a "+(path.length-1)+"-move escape route.", "");
+};
+document.getElementById("ovRetry").onclick=()=>loadLevel(lvlIdx);
+document.getElementById("ovNext").onclick=()=>loadLevel(Math.min(lvlIdx+1, LEVELS.length-1));
+function renderLevelBar(){
+  const bar=document.getElementById("levelBar"); bar.innerHTML="";
+  LEVELS.forEach((L,i)=>{
+    const b=document.createElement("button");
+    b.className="lvl"+(i===lvlIdx?" current":"")+(localStorage.getItem("pe_done_"+i)?" done":"")+(i>unlocked?" locked":"");
+    b.textContent=i+1; b.title=L.name;
+    b.onclick=()=>{ if (i<=unlocked) loadLevel(i); };
+    bar.appendChild(b);
+  });
+}
+loadLevel(0);
+</script>
+</body>
+</html>
