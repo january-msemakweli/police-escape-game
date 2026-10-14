@@ -194,7 +194,7 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
   }
   // nodes
-  const reachable = (!over && !busy) ? adj[girl] : [];
+  const reachable = (!over && !busy && adj[girl]) ? adj[girl] : [];
   const now = performance.now();
   L.nodes.forEach((n,i)=>{
     const [x,y]=px(i);
@@ -224,8 +224,6 @@ function roundRect(x,y,w,h,r){
   ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
   ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
 }
-(function loop(){ draw(); requestAnimationFrame(loop); })();
-
 /* ============ Animation / turns ============ */
 function tween(from, to, dur, onDone){
   const t0=performance.now();
@@ -307,6 +305,7 @@ function renderLevelBar(){
   });
 }
 loadLevel(0);
+(function loop(){ draw(); requestAnimationFrame(loop); })();
 </script>
 </body>
 </html>
